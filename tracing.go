@@ -1,6 +1,9 @@
 package gobs
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // Attribute is one span attribute. Values are strings to keep the neutral port
 // simple; an OTel adapter maps them to its own attribute type.
@@ -59,4 +62,26 @@ func SpanFromContext(ctx context.Context) (Span, bool) {
 	}
 	span, ok := ctx.Value(spanContextKey{}).(Span)
 	return span, ok
+}
+
+// Transport injects the W3C traceparent from the request context into
+// outbound HTTP requests. It is opt-in: applications wrap their own
+// http.Client.Transport, so no library decides an HTTP client for them.
+type Transport struct {
+	Base http.RoundTripper
+}
+
+// RoundTrip implements http.RoundTripper.
+func (t Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	trace, ok := TraceFromContext(req.Context())
+	if !ok || !trace.Valid() {
+		return base.RoundTrip(req)
+	}
+	clone := req.Clone(req.Context())
+	clone.Header.Set("traceparent", trace.Traceparent())
+	return base.RoundTrip(clone)
 }

@@ -3,6 +3,8 @@ package gobs
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -408,5 +410,47 @@ func TestNoopTracerAndNilSpan(t *testing.T) {
 	}
 	if ctx := WithSpan(ctx, nil); ctx != context.Background() {
 		t.Fatal("nil span changed the context")
+	}
+}
+
+func TestHTTPTransportInjectsTraceparent(t *testing.T) {
+	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	trace, ok := ParseTraceparent(traceparent)
+	if !ok {
+		t.Fatal("invalid fixture")
+	}
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("traceparent")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := &http.Client{Transport: Transport{}}
+	req, _ := http.NewRequestWithContext(WithTrace(context.Background(), trace), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got != traceparent {
+		t.Fatalf("traceparent = %q, want %q", got, traceparent)
+	}
+}
+
+func TestHTTPTransportWithoutTraceDoesNotAddHeader(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("traceparent")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	resp, err := (&http.Client{Transport: Transport{}}).Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got != "" {
+		t.Fatalf("unexpected traceparent %q", got)
 	}
 }
