@@ -43,9 +43,10 @@ jobCfg.Metrics, _ = gobs.GJob(obs)
 modbusCfg.Metrics, _ = gobs.GModbusClient(obs)
 modbusServerCfg.Metrics, _ = gobs.GModbusServer(obs)
 obs.RegisterHealth("cache", true, cache)
+if err := gobs.RegisterGCache(obs, cache); err != nil { return err }
 ```
 
-`Default` 只是参考集合；组合根也可以只注册需要的适配器：
+`Default` 只是参考集合；像 gcache 这种绑定实例的适配器需要显式注册（cache 由应用模块创建）。组合根也可以只注册需要的适配器：
 
 ```go
 if err := gobs.RegisterGNety(obs); err != nil { return err }
@@ -70,6 +71,7 @@ mine, ok := gobs.Get[*myAdapter](obs, "my-adapter")
 | `gmodbus-client` / `gmodbus-server` | 按 function/result 的请求数与延迟 |
 | `gbus` | 发布、消费、重试、死信 |
 | `gjob` | 触发领取/延后、执行与耗时、租约丢失 |
+| `gcache` | 本地 entries/bytes、local/remote 命中和未命中/错误、loader、失效、stale、health 失败、negative hit（cache 由应用模块持有，需显式注册） |
 | health | 任意 `Health(context.Context) error` 探针，例如 cache |
 
 标签保持低基数：transport、result、reason、function、outcome、job、state、

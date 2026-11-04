@@ -48,9 +48,10 @@ jobCfg.Metrics, _ = gobs.GJob(obs)
 modbusCfg.Metrics, _ = gobs.GModbusClient(obs)
 modbusServerCfg.Metrics, _ = gobs.GModbusServer(obs)
 obs.RegisterHealth("cache", true, cache)
+if err := gobs.RegisterGCache(obs, cache); err != nil { return err }
 ```
 
-`Default` is only the reference set. A composition root can register a subset:
+`Default` is only the reference set. Instance-bound adapters such as `gcache` are registered explicitly because the cache is created by an application module, not by gobs. A composition root can register a subset:
 
 ```go
 if err := gobs.RegisterGNety(obs); err != nil { return err }
@@ -75,6 +76,7 @@ mine, ok := gobs.Get[*myAdapter](obs, "my-adapter")
 | `gmodbus-client` / `gmodbus-server` | requests and latency by function/result |
 | `gbus` | published, consumed, retried, dead-lettered |
 | `gjob` | trigger claimed/deferred, executions and duration, lease lost |
+| `gcache` | local entries/bytes, local/remote hits/misses/errors, loads, invalidations, stale, health failures, negative hits (registered explicitly because a cache instance is application-owned) |
 | health | any `Health(context.Context) error` probe (for example a cache) |
 
 Metric labels are bounded: transport, result, reason, function, outcome, job,

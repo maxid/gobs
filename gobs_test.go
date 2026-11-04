@@ -10,6 +10,7 @@ import (
 	"github.com/maxid/gable/health"
 	"github.com/maxid/gable/metrics"
 	gbus "github.com/maxid/gbus"
+	"github.com/maxid/gcache"
 	gjob "github.com/maxid/gjob"
 )
 
@@ -231,5 +232,70 @@ func TestNewRegistryWithNilMetrics(t *testing.T) {
 	}
 	if Default(nil) == nil {
 		t.Fatal("nil registry should fail")
+	}
+}
+
+func TestRegisterGCacheSnapshot(t *testing.T) {
+	cache, err := gcache.New(gcache.Config{Namespace: "gobs-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+
+	registry := NewRegistry(metrics.New())
+	if err := RegisterGCache(registry, cache); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, _, err := cache.Get(ctx, "missing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Set(ctx, "key", []byte("value"), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := cache.Get(ctx, "key"); err != nil || !ok {
+		t.Fatalf("get key ok=%v err=%v", ok, err)
+	}
+
+	text := registry.Metrics().Render()
+	for _, want := range []string{
+		"# TYPE cache_local_entries gauge",
+		"# TYPE cache_local_bytes gauge",
+		"# TYPE cache_local_hits_total counter",
+		"# TYPE cache_local_misses_total counter",
+		"# TYPE cache_remote_hits_total counter",
+		"# TYPE cache_loads_total counter",
+		"# TYPE cache_invalidations_published_total counter",
+		"# TYPE cache_health_failures_total counter",
+		"cache_local_hits_total 1",
+		"cache_local_misses_total 1",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+	if err := RegisterGCache(registry, nil); !errors.Is(err, ErrInvalidAdapter) {
+		t.Fatalf("nil cache err = %v", err)
+	}
+	if err := RegisterGCache(registry, cache); !errors.Is(err, ErrDuplicateAdapter) {
+		t.Fatalf("duplicate cache err = %v", err)
+	}
+}
+
+func TestDuplicateRegistrationDoesNotInvokeFactory(t *testing.T) {
+	registry := NewRegistry(metrics.New())
+	calls := 0
+	factory := func(*metrics.Registry) (any, error) {
+		calls++
+		return &struct{}{}, nil
+	}
+	if err := registry.Add("once", factory); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Add("once", factory); !errors.Is(err, ErrDuplicateAdapter) {
+		t.Fatalf("duplicate err = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("factory called %d times, want 1", calls)
 	}
 }

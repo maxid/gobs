@@ -57,6 +57,12 @@ func (r *Registry) Add(name string, factory Factory) error {
 	if name == "" || factory == nil {
 		return ErrInvalidAdapter
 	}
+	r.mu.RLock()
+	_, exists := r.adapters[name]
+	r.mu.RUnlock()
+	if exists {
+		return fmt.Errorf("%w: %q", ErrDuplicateAdapter, name)
+	}
 	adapter, err := factory(r.metrics)
 	if err != nil {
 		return fmt.Errorf("gobs: adapter %q: %w", name, err)
