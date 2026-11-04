@@ -1,6 +1,6 @@
 package gobs
 
-// Default registers the reference-first adapters used by the xdmp-go
+// Default registers the reference-first adapters used by application
 // distributions. Composition roots that need a subset can call the individual
 // Register* functions instead.
 func Default(r *Registry) error {
