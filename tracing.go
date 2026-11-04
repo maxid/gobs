@@ -3,6 +3,8 @@ package gobs
 import (
 	"context"
 	"net/http"
+
+	"github.com/maxid/gnety/codec/coap"
 )
 
 // Attribute is one span attribute. Values are strings to keep the neutral port
@@ -84,4 +86,37 @@ func (t Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("traceparent", trace.Traceparent())
 	return base.RoundTrip(clone)
+}
+
+// TraceparentOption is an elective CoAP option used for W3C trace propagation.
+// It is not a standard option: both peers must agree to it, so callers must
+// treat its absence as "internal span only", never as an error.
+const TraceparentOption uint16 = 65000
+
+// WithCoAPTrace injects traceparent into a copy of options. It replaces any
+// existing traceparent option and preserves every other option. Without a
+// valid context trace the original slice is returned unchanged.
+func WithCoAPTrace(ctx context.Context, options []coap.Option) []coap.Option {
+	trace, ok := TraceFromContext(ctx)
+	if !ok || !trace.Valid() {
+		return options
+	}
+	out := make([]coap.Option, 0, len(options)+1)
+	for _, option := range options {
+		if option.Number != TraceparentOption {
+			out = append(out, option)
+		}
+	}
+	out = append(out, coap.Option{Number: TraceparentOption, Value: []byte(trace.Traceparent())})
+	return out
+}
+
+// TraceFromCoAPOptions extracts a W3C traceparent from CoAP options.
+func TraceFromCoAPOptions(options []coap.Option) (TraceContext, bool) {
+	for _, option := range options {
+		if option.Number == TraceparentOption {
+			return ParseTraceparent(string(option.Value))
+		}
+	}
+	return TraceContext{}, false
 }

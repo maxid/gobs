@@ -15,6 +15,7 @@ import (
 	"github.com/maxid/gcache"
 	gjob "github.com/maxid/gjob"
 	gmqxhook "github.com/maxid/gmqx/hook"
+	"github.com/maxid/gnety/codec/coap"
 )
 
 func newDefault(t *testing.T) (*Registry, *metrics.Registry) {
@@ -604,5 +605,41 @@ func TestTraceJobExecutor(t *testing.T) {
 	}
 	if TraceJobExecutor(nil, tracer) != nil {
 		t.Fatal("nil base executor should return nil")
+	}
+}
+
+func TestCoAPTraceOption(t *testing.T) {
+	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	trace, ok := ParseTraceparent(traceparent)
+	if !ok {
+		t.Fatal("invalid fixture")
+	}
+	options := []coap.Option{{Number: 11, Value: []byte("devices")}}
+	got := WithCoAPTrace(WithTrace(context.Background(), trace), options)
+	if len(got) != 2 || got[0].Number != 11 || got[1].Number != TraceparentOption {
+		t.Fatalf("options = %+v", got)
+	}
+	if extracted, ok := TraceFromCoAPOptions(got); !ok || extracted != trace {
+		t.Fatalf("extract = %+v ok=%v", extracted, ok)
+	}
+	// Existing traceparent values are replaced, not duplicated.
+	got = WithCoAPTrace(WithTrace(context.Background(), trace), append(got, coap.Option{Number: TraceparentOption, Value: []byte("stale")}))
+	count := 0
+	for _, option := range got {
+		if option.Number == TraceparentOption {
+			count++
+			if string(option.Value) != traceparent {
+				t.Fatalf("traceparent = %q", option.Value)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("traceparent options = %d", count)
+	}
+	if unchanged := WithCoAPTrace(context.Background(), options); len(unchanged) != 1 || unchanged[0].Number != 11 {
+		t.Fatalf("no-trace context changed options: %+v", unchanged)
+	}
+	if _, ok := TraceFromCoAPOptions(nil); ok {
+		t.Fatal("empty options reported a trace")
 	}
 }
