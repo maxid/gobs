@@ -1,0 +1,12 @@
+github.com/maxid/gable v0.0.0-20261104024948-e9f0a948147c h1:HswpCBEzBVtnw1cDxczN7zffHSNJRbHHo6GYLINWWss=
+github.com/maxid/gable v0.0.0-20261104024948-e9f0a948147c/go.mod h1:FWKrtioEcyhGamBwXlU/b+V5NAS8XZxuKUNbvbBw9vA=
+github.com/maxid/gbus v0.0.0-20261031175600-1cb259b54f8b h1:BKpF+jiuhg72cYRsm5iiTdvHdA07aZnSdbYyiV63LY0=
+github.com/maxid/gbus v0.0.0-20261031175600-1cb259b54f8b/go.mod h1:RWBEk6IlbbIAKqOx7aQc7xwUACp3bJRQ7DD2CTrOwlc=
+github.com/maxid/gjob v0.0.0-20261031175302-3f8851a7d331 h1:niuZh1T3UHOyuho0WyU/mUb23lAfbxUqBNG/dhwdke8=
+github.com/maxid/gjob v0.0.0-20261031175302-3f8851a7d331/go.mod h1:CDAi+eLdjffJAphLR3y9z2PaKKorIwYfkq5CPHAojPY=
+github.com/maxid/gmodbus v0.0.0-20261102035918-e178368c4ea8 h1:oR83NE6bbM5KfgrZaf+f/dQ7Ji9vIM4AZItcK3GIlpU=
+github.com/maxid/gmodbus v0.0.0-20261102035918-e178368c4ea8/go.mod h1:0paT7C6nu1hNGvZUYktquXkZatmGPzclbDygil+oNVs=
+github.com/maxid/gmqx v0.0.0-20261103063017-db75e7fc8a59 h1:8igWmzBxI4mOAMrsPwvc8UzvZwtFvi7kHNLn7lEssp4=
+github.com/maxid/gmqx v0.0.0-20261103063017-db75e7fc8a59/go.mod h1:Tk4f/+UZ1xm6VjFjgYhYdKGUmG63m6XTYN+XKhARZgM=
+github.com/maxid/gnety v0.0.0-20261102040548-6a58bfaa9b94 h1:0MGWZy2L4Y9QfSCj3CW1S+YeE0I6iN1dSRUMiEGPHQ4=
+github.com/maxid/gnety v0.0.0-20261102040548-6a58bfaa9b94/go.mod h1:N56Y8M/otpHSaSmOlhtvrykr1Iud6PliOjgh5u/Bfpc=

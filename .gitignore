@@ -1,0 +1,15 @@
+/bin/
+logs/
+*.test
+
+# build outputs — nothing compiled belongs in the repository (AGENTS.md §6)
+/dist/
+*.exe
+*.out
+*.so
+*.dylib
+*.a
+*.prof
+coverage.*
+# `go build ./examples/app` drops the binary in the module root, named after the package
+/app
