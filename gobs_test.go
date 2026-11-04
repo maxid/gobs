@@ -365,12 +365,14 @@ func (s *testSpan) SetAttributes(attrs ...Attribute) { s.attrs = append(s.attrs,
 func (s *testSpan) TraceContext() TraceContext       { return s.trace }
 
 type testTracer struct {
-	span *testSpan
-	name string
+	span  *testSpan
+	name  string
+	attrs []Attribute
 }
 
 func (t *testTracer) Start(ctx context.Context, name string, attrs ...Attribute) (context.Context, Span) {
 	t.name = name
+	t.attrs = append(t.attrs, attrs...)
 	t.span = &testSpan{trace: TraceContext{
 		TraceID: "4bf92f3577b34da6a3ce929d0e0e4736",
 		SpanID:  "00f067aa0ba902b7",
@@ -453,4 +455,91 @@ func TestHTTPTransportWithoutTraceDoesNotAddHeader(t *testing.T) {
 	if got != "" {
 		t.Fatalf("unexpected traceparent %q", got)
 	}
+}
+
+func TestBusTraceHeaders(t *testing.T) {
+	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	trace, ok := ParseTraceparent(traceparent)
+	if !ok {
+		t.Fatal("invalid fixture")
+	}
+	headers := []gbus.Header{
+		{Key: "k", Value: []byte("v")},
+		{Key: TraceparentHeader, Value: []byte("stale")},
+	}
+	got := WithBusTrace(WithTrace(context.Background(), trace), headers)
+	if len(got) != 2 {
+		t.Fatalf("headers = %+v", got)
+	}
+	if got[0].Key != "k" || string(got[0].Value) != "v" {
+		t.Fatalf("unrelated header changed: %+v", got)
+	}
+	if string(got[1].Value) != traceparent {
+		t.Fatalf("traceparent = %q", got[1].Value)
+	}
+	if extracted, ok := TraceFromBusHeaders(got); !ok || extracted != trace {
+		t.Fatalf("extract = %+v ok=%v", extracted, ok)
+	}
+	if unchanged := WithBusTrace(context.Background(), headers); len(unchanged) != 2 || string(unchanged[1].Value) != "stale" {
+		t.Fatalf("no-trace context changed headers: %+v", unchanged)
+	}
+}
+
+func TestTraceBusHandler(t *testing.T) {
+	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	parent, _ := ParseTraceparent(traceparent)
+	tracer := &testTracer{}
+	var child TraceContext
+	var have bool
+	base := gbus.HandlerFunc(func(ctx context.Context, record gbus.Record) gbus.Result {
+		child, have = TraceFromContext(ctx)
+		return gbus.Result{Outcome: gbus.Ack, Reason: "ok"}
+	})
+	handler := TraceBusHandler(base, tracer)
+	result := handler.Handle(context.Background(), gbus.Record{
+		Message: gbus.Message{
+			Topic: "devices/events",
+			Headers: []gbus.Header{
+				{Key: TraceparentHeader, Value: []byte(traceparent)},
+			},
+		},
+		Partition: 2,
+		Offset:    17,
+	})
+	if result.Outcome != gbus.Ack || result.Reason != "ok" {
+		t.Fatalf("result = %+v", result)
+	}
+	if !have || child != parent {
+		t.Fatalf("handler parent = %+v ok=%v", child, have)
+	}
+	if tracer.name != "bus.consume" {
+		t.Fatalf("span name = %q", tracer.name)
+	}
+	for _, want := range []struct{ key, value string }{
+		{"messaging.destination.name", "devices/events"},
+		{"messaging.partition", "2"},
+		{"messaging.offset", "17"},
+		{"messaging.outcome", "ack"},
+		{"messaging.reason", "ok"},
+	} {
+		attrs := append(append([]Attribute(nil), tracer.attrs...), tracer.span.attrs...)
+		if !hasAttr(attrs, want.key, want.value) {
+			t.Fatalf("missing %s=%s in %+v", want.key, want.value, attrs)
+		}
+	}
+	if !tracer.span.ended {
+		t.Fatal("span was not ended")
+	}
+	if TraceBusHandler(nil, tracer) != nil {
+		t.Fatal("nil base handler should return nil")
+	}
+}
+
+func hasAttr(attrs []Attribute, key, value string) bool {
+	for _, attr := range attrs {
+		if attr.Key == key && attr.Value == value {
+			return true
+		}
+	}
+	return false
 }
