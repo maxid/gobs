@@ -2,8 +2,10 @@ package gobs
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/maxid/gable/health"
@@ -129,4 +131,84 @@ func (r *Registry) RegisterHealth(name string, critical bool, probe HealthProbe)
 		return
 	}
 	RegisterHealth(r.health, name, critical, probe)
+}
+
+// TraceContext is the W3C traceparent portion used for log correlation and
+// outbound propagation. It deliberately has no dependency on an OTel SDK.
+type TraceContext struct {
+	TraceID string
+	SpanID  string
+	Sampled bool
+}
+
+// Valid reports whether both ids are lowercase hex of the W3C lengths and are
+// not all zero.
+func (t TraceContext) Valid() bool {
+	return validTraceID(t.TraceID) && validSpanID(t.SpanID)
+}
+
+func validTraceID(id string) bool {
+	if len(id) != 32 || id == strings.Repeat("0", 32) {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil && strings.ToLower(id) == id
+}
+
+func validSpanID(id string) bool {
+	if len(id) != 16 || id == strings.Repeat("0", 16) {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil && strings.ToLower(id) == id
+}
+
+// ParseTraceparent parses "00-<32hex>-<16hex>-<2hex>". A malformed or
+// unsupported header is reported as absent rather than guessed.
+func ParseTraceparent(value string) (TraceContext, bool) {
+	parts := strings.Split(strings.TrimSpace(value), "-")
+	if len(parts) != 4 || parts[0] != "00" {
+		return TraceContext{}, false
+	}
+	trace := TraceContext{TraceID: parts[1], SpanID: parts[2]}
+	if !trace.Valid() || len(parts[3]) != 2 || strings.ToLower(parts[3]) != parts[3] {
+		return TraceContext{}, false
+	}
+	flags, err := hex.DecodeString(parts[3])
+	if err != nil {
+		return TraceContext{}, false
+	}
+	trace.Sampled = flags[0]&0x01 == 1
+	return trace, true
+}
+
+// Traceparent renders the context in W3C form. An invalid context renders "".
+func (t TraceContext) Traceparent() string {
+	if !t.Valid() {
+		return ""
+	}
+	flags := "00"
+	if t.Sampled {
+		flags = "01"
+	}
+	return "00-" + t.TraceID + "-" + t.SpanID + "-" + flags
+}
+
+type traceContextKey struct{}
+
+// WithTrace attaches a valid trace context. An invalid context is ignored.
+func WithTrace(ctx context.Context, trace TraceContext) context.Context {
+	if ctx == nil || !trace.Valid() {
+		return ctx
+	}
+	return context.WithValue(ctx, traceContextKey{}, trace)
+}
+
+// TraceFromContext returns the attached trace context.
+func TraceFromContext(ctx context.Context) (TraceContext, bool) {
+	if ctx == nil {
+		return TraceContext{}, false
+	}
+	trace, ok := ctx.Value(traceContextKey{}).(TraceContext)
+	return trace, ok
 }

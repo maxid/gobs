@@ -299,3 +299,54 @@ func TestDuplicateRegistrationDoesNotInvokeFactory(t *testing.T) {
 		t.Fatalf("factory called %d times, want 1", calls)
 	}
 }
+
+func TestTraceparentRoundTrip(t *testing.T) {
+	const header = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	trace, ok := ParseTraceparent(header)
+	if !ok {
+		t.Fatal("valid traceparent rejected")
+	}
+	if trace.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || trace.SpanID != "00f067aa0ba902b7" || !trace.Sampled {
+		t.Fatalf("trace = %+v", trace)
+	}
+	if got := trace.Traceparent(); got != header {
+		t.Fatalf("rendered = %q", got)
+	}
+	ctx := WithTrace(context.Background(), trace)
+	from, ok := TraceFromContext(ctx)
+	if !ok || from != trace {
+		t.Fatalf("context = %+v ok=%v", from, ok)
+	}
+}
+
+func TestTraceparentRejectsMalformed(t *testing.T) {
+	for _, header := range []string{
+		"",
+		"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+		"01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+		"00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+		"00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+		"00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01",
+	} {
+		if trace, ok := ParseTraceparent(header); ok {
+			t.Fatalf("%q accepted: %+v", header, trace)
+		}
+	}
+	if got := (TraceContext{}).Traceparent(); got != "" {
+		t.Fatalf("invalid render = %q", got)
+	}
+	if ctx := WithTrace(context.Background(), TraceContext{}); ctx != context.Background() {
+		// context.Background is a singleton; an invalid trace must be a no-op.
+		t.Fatal("invalid trace changed the context")
+	}
+}
+
+func TestTraceparentFlags(t *testing.T) {
+	base := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-"
+	for flags, sampled := range map[string]bool{"00": false, "01": true, "03": true} {
+		trace, ok := ParseTraceparent(base + flags)
+		if !ok || trace.Sampled != sampled {
+			t.Fatalf("%s sampled = %v ok=%v", flags, trace.Sampled, ok)
+		}
+	}
+}
