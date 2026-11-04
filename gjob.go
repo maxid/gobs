@@ -1,6 +1,8 @@
 package gobs
 
 import (
+	"context"
+	"strconv"
 	"time"
 
 	"github.com/maxid/gable/metrics"
@@ -51,3 +53,33 @@ func (m *gjobAdapter) ExecutionFinished(job string, state gjob.State, d time.Dur
 	m.latency.With(labels...).Observe(d.Seconds())
 }
 func (m *gjobAdapter) LeaseLost(job string) { m.lease.With(job).Inc() }
+
+// TraceJobExecutor wraps a job executor with one span per execution. The
+// execution context is preserved, so a caller-provided trace parent (for
+// example from a scheduler job payload) remains the parent.
+func TraceJobExecutor(base gjob.Executor, tracer Tracer) gjob.Executor {
+	if base == nil {
+		return nil
+	}
+	if tracer == nil {
+		tracer = NoopTracer{}
+	}
+	return jobExecutorTracer{base: base, tracer: tracer}
+}
+
+type jobExecutorTracer struct {
+	base   gjob.Executor
+	tracer Tracer
+}
+
+func (e jobExecutorTracer) Execute(ctx context.Context, execution gjob.Execution) error {
+	ctx, span := e.tracer.Start(ctx, "job.execute",
+		Attribute{Key: "job.name", Value: execution.JobName},
+		Attribute{Key: "job.execution_id", Value: execution.ID},
+		Attribute{Key: "job.trigger", Value: string(execution.TriggerType)},
+		Attribute{Key: "job.attempt", Value: strconv.Itoa(execution.Attempt)},
+	)
+	err := e.base.Execute(ctx, execution)
+	span.End(err)
+	return err
+}

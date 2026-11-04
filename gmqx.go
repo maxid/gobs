@@ -1,6 +1,9 @@
 package gobs
 
 import (
+	"context"
+	"strconv"
+
 	"github.com/maxid/gable/metrics"
 	gmqxhook "github.com/maxid/gmqx/hook"
 )
@@ -68,3 +71,63 @@ func (m *gmqxAdapter) RecordQueueDepth(queue string, depth int) {
 	m.queueDepth.With(queue).Set(float64(depth))
 }
 func (m *gmqxAdapter) RecordConnections(count int) { m.connections.Set(float64(count)) }
+
+// TraceMQTTSink wraps a broker EventSink with spans for connect/publish and
+// disconnect events. The broker's context is used as the parent; MQTT 3.1.1
+// has no wire metadata, so these are internal spans rather than a propagated
+// end-to-end trace.
+func TraceMQTTSink(base gmqxhook.EventSink, tracer Tracer) gmqxhook.EventSink {
+	if base == nil {
+		return nil
+	}
+	if tracer == nil {
+		tracer = NoopTracer{}
+	}
+	return mqttSinkTracer{base: base, tracer: tracer}
+}
+
+type mqttSinkTracer struct {
+	base   gmqxhook.EventSink
+	tracer Tracer
+}
+
+func (s mqttSinkTracer) OnConnect(ctx context.Context, info gmqxhook.ConnectInfo) {
+	_, span := s.tracer.Start(ctx, "mqtt.connect",
+		Attribute{Key: "messaging.system", Value: "mqtt"},
+	)
+	defer span.End(nil)
+	s.base.OnConnect(ctx, info)
+}
+
+func (s mqttSinkTracer) OnDisconnect(ctx context.Context, clientID string, err error) {
+	_, span := s.tracer.Start(ctx, "mqtt.disconnect",
+		Attribute{Key: "messaging.system", Value: "mqtt"},
+	)
+	defer span.End(err)
+	s.base.OnDisconnect(ctx, clientID, err)
+}
+
+func (s mqttSinkTracer) OnConnectionLost(ctx context.Context, clientID string, err error) {
+	_, span := s.tracer.Start(ctx, "mqtt.connection_lost",
+		Attribute{Key: "messaging.system", Value: "mqtt"},
+	)
+	defer span.End(err)
+	s.base.OnConnectionLost(ctx, clientID, err)
+}
+
+func (s mqttSinkTracer) OnPublish(ctx context.Context, ev gmqxhook.PublishEvent) gmqxhook.PublishResult {
+	ctx, span := s.tracer.Start(ctx, "mqtt.publish",
+		Attribute{Key: "messaging.system", Value: "mqtt"},
+		Attribute{Key: "messaging.destination.name", Value: ev.Topic},
+		Attribute{Key: "messaging.qos", Value: strconv.Itoa(int(ev.QoS))},
+		Attribute{Key: "messaging.retain", Value: strconv.FormatBool(ev.Retain)},
+	)
+	result := s.base.OnPublish(ctx, ev)
+	span.SetAttributes(Attribute{Key: "messaging.disposition", Value: strconv.Itoa(int(result.Disposition))})
+	span.End(nil)
+	return result
+}
+
+func (s mqttSinkTracer) OnPing(ctx context.Context, clientID string) {
+	s.base.OnPing(ctx, clientID)
+}

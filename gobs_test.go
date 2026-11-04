@@ -14,6 +14,7 @@ import (
 	gbus "github.com/maxid/gbus"
 	"github.com/maxid/gcache"
 	gjob "github.com/maxid/gjob"
+	gmqxhook "github.com/maxid/gmqx/hook"
 )
 
 func newDefault(t *testing.T) (*Registry, *metrics.Registry) {
@@ -542,4 +543,66 @@ func hasAttr(attrs []Attribute, key, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestTraceMQTTSink(t *testing.T) {
+	tracer := &testTracer{}
+	base := gmqxhook.SinkFuncs{
+		OnPublishFunc: func(ctx context.Context, ev gmqxhook.PublishEvent) gmqxhook.PublishResult {
+			return gmqxhook.PublishResult{Disposition: gmqxhook.PublishAccepted}
+		},
+	}
+	sink := TraceMQTTSink(base, tracer)
+	result := sink.OnPublish(context.Background(), gmqxhook.PublishEvent{
+		Topic: "devices/1/events", QoS: 1, Retain: true,
+	})
+	if !result.Accepted() {
+		t.Fatalf("result = %+v", result)
+	}
+	if tracer.name != "mqtt.publish" || !tracer.span.ended {
+		t.Fatalf("span = %+v", tracer.span)
+	}
+	for _, want := range []struct{ key, value string }{
+		{"messaging.destination.name", "devices/1/events"},
+		{"messaging.qos", "1"},
+		{"messaging.retain", "true"},
+		{"messaging.disposition", "0"},
+	} {
+		if !hasAttr(append(tracer.attrs, tracer.span.attrs...), want.key, want.value) {
+			t.Fatalf("missing %s=%s in %+v", want.key, want.value, tracer.attrs)
+		}
+	}
+	if TraceMQTTSink(nil, tracer) != nil {
+		t.Fatal("nil base sink should return nil")
+	}
+}
+
+func TestTraceJobExecutor(t *testing.T) {
+	tracer := &testTracer{}
+	base := gjob.ExecutorFunc(func(ctx context.Context, execution gjob.Execution) error {
+		return errors.New("boom")
+	})
+	executor := TraceJobExecutor(base, tracer)
+	err := executor.Execute(context.Background(), gjob.Execution{
+		ID: "exec-1", JobName: "nightly", TriggerType: gjob.TriggerCron, Attempt: 2,
+	})
+	if err == nil {
+		t.Fatal("expected execution error")
+	}
+	if tracer.name != "job.execute" || !tracer.span.ended || tracer.span.err == nil {
+		t.Fatalf("span = %+v", tracer.span)
+	}
+	for _, want := range []struct{ key, value string }{
+		{"job.name", "nightly"},
+		{"job.execution_id", "exec-1"},
+		{"job.trigger", "cron"},
+		{"job.attempt", "2"},
+	} {
+		if !hasAttr(tracer.attrs, want.key, want.value) {
+			t.Fatalf("missing %s=%s in %+v", want.key, want.value, tracer.attrs)
+		}
+	}
+	if TraceJobExecutor(nil, tracer) != nil {
+		t.Fatal("nil base executor should return nil")
+	}
 }
