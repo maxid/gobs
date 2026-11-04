@@ -350,3 +350,63 @@ func TestTraceparentFlags(t *testing.T) {
 		}
 	}
 }
+
+type testSpan struct {
+	ended bool
+	err   error
+	attrs []Attribute
+	trace TraceContext
+}
+
+func (s *testSpan) End(err error)                    { s.ended, s.err = true, err }
+func (s *testSpan) SetAttributes(attrs ...Attribute) { s.attrs = append(s.attrs, attrs...) }
+func (s *testSpan) TraceContext() TraceContext       { return s.trace }
+
+type testTracer struct {
+	span *testSpan
+	name string
+}
+
+func (t *testTracer) Start(ctx context.Context, name string, attrs ...Attribute) (context.Context, Span) {
+	t.name = name
+	t.span = &testSpan{trace: TraceContext{
+		TraceID: "4bf92f3577b34da6a3ce929d0e0e4736",
+		SpanID:  "00f067aa0ba902b7",
+	}}
+	return WithSpan(ctx, t.span), t.span
+}
+
+func TestTracerPort(t *testing.T) {
+	tracer := &testTracer{}
+	ctx, span := tracer.Start(context.Background(), "op", Attribute{Key: "k", Value: "v"})
+	if tracer.name != "op" {
+		t.Fatalf("name = %q", tracer.name)
+	}
+	if got, ok := SpanFromContext(ctx); !ok || got != span {
+		t.Fatal("span not attached to context")
+	}
+	span.SetAttributes(Attribute{Key: "a", Value: "b"})
+	span.End(errors.New("boom"))
+	if !tracer.span.ended || tracer.span.err == nil || len(tracer.span.attrs) != 1 {
+		t.Fatalf("span = %+v", tracer.span)
+	}
+	if trace := span.TraceContext(); !trace.Valid() {
+		t.Fatalf("trace = %+v", trace)
+	}
+}
+
+func TestNoopTracerAndNilSpan(t *testing.T) {
+	ctx := context.Background()
+	got, span := (NoopTracer{}).Start(ctx, "op")
+	if got != ctx {
+		t.Fatal("noop tracer changed the context")
+	}
+	span.SetAttributes(Attribute{Key: "x", Value: "y"})
+	span.End(errors.New("ignored"))
+	if trace := span.TraceContext(); trace.Valid() {
+		t.Fatalf("noop span has a trace: %+v", trace)
+	}
+	if ctx := WithSpan(ctx, nil); ctx != context.Background() {
+		t.Fatal("nil span changed the context")
+	}
+}
